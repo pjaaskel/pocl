@@ -203,6 +203,9 @@
 
 #cmakedefine LLVM_BUILD_MODE_DEBUG
 
+#cmakedefine USE_LLVM_FOR_DYNLIBS
+#cmakedefine USE_LLVM_FOR_PROCESSES
+
 #ifndef LLVM_VERSION
 #define LLVM_VERSION "@LLVM_VERSION_FULL@"
 #endif
