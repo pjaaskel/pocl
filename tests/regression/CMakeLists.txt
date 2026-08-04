@@ -231,6 +231,7 @@ set_tests_properties(
   "regression/test_mem_host_ptr_issue_${VARIANT}"
   "regression/test_issue_1962_${VARIANT}"
   "regression/test_issue_2005_${VARIANT}"
+  "regression/test_issue_2113_${VARIANT}"
   PROPERTIES
     COST 1.5
     PROCESSORS 1
