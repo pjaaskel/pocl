@@ -96,8 +96,10 @@ add_test_pocl(NAME "workgroup/unconditional_barriers"
               EXPECTED_OUTPUT "basic_barriers_2_2_2_2.stdout"
               COMMAND "run_kernel" "basic_barriers.cl" 2 2 2 2)
 
+# Conditional barriers fall back to CBS even when loopvec is requested
+# (WorkitemLoops::canHandleKernel declines them; see pocl/pocl#849).
 add_test_pocl(NAME "workgroup/conditional_barrier_loopvec"
-              EXPECTED_OUTPUT "cond_barriers_1_2_1_1_loopvec.stdout"
+              EXPECTED_OUTPUT "cond_barriers_1_2_1_1_cbs.stdout"
               COMMAND "run_kernel" "conditional_barriers.cl" 1 2 1 1
               WORKITEM_HANDLER "loopvec")
 
@@ -106,8 +108,9 @@ add_test_pocl(NAME "workgroup/conditional_barrier_cbs"
               COMMAND "run_kernel" "conditional_barriers.cl" 1 2 1 1
               WORKITEM_HANDLER "cbs")
 
+# Conditional barriers fall back to CBS even when loopvec is requested.
 add_test_pocl(NAME "workgroup/conditional_barrier_dynamic"
-              EXPECTED_OUTPUT "cond_barriers_dynamic_1_16_1_1_loopvec.stdout"
+              EXPECTED_OUTPUT "cond_barriers_dynamic_1_16_1_1_cbs.stdout"
               COMMAND "run_kernel" "conditional_barrier_dynamic.cl" 1 16 1 1
               WORKITEM_HANDLER "loopvec"
               LABELS "cpu_fail")

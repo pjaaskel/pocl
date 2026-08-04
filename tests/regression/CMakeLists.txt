@@ -58,6 +58,7 @@ set(PROGRAMS_TO_BUILD test_barrier_between_for_loops test_early_return
   test_workitem_func_outside_kernel test_program_scope_vars test_issue_1548
   test_issue_1525 test_issue_1608 test_issue_1826 test_builtin_regression
   test_mem_host_ptr_issue test_issue_1962 test_issue_2005
+  test_issue_849
   test_global_atomics test_large_stack_frame
 )
 if(UNIX)
@@ -125,6 +126,8 @@ add_test_pocl(NAME "regression/test_mem_host_ptr_issue"
 add_test_pocl(NAME "regression/test_issue_1962" COMMAND "test_issue_1962")
 
 add_test_pocl(NAME "regression/test_issue_2005" COMMAND "test_issue_2005")
+
+add_test_pocl(NAME "regression/test_issue_849" COMMAND "test_issue_849")
 
 if(UNIX)
   add_test_pocl(NAME "regression/test_issue_2174" COMMAND "test_issue_2174")
@@ -237,6 +240,7 @@ set_tests_properties(
   "regression/test_mem_host_ptr_issue_${VARIANT}"
   "regression/test_issue_1962_${VARIANT}"
   "regression/test_issue_2005_${VARIANT}"
+  "regression/test_issue_849_${VARIANT}"
   PROPERTIES
     COST 1.5
     PROCESSORS 1

@@ -1414,6 +1414,37 @@ bool WorkitemLoops::canHandleKernel(llvm::Function &K,
     }
   }
 
+  // Do not handle kernels with conditional barriers via WILoops peeling.
+  // Peeling the first work-item to decide which barrier branch to take
+  // complicates parallel-region formation and has produced incorrect
+  // codegen (heap corruption / OOB local stores) for kernels that write
+  // to local memory both inside a conditional barrier region and again
+  // after it (see pocl/pocl#849). The peeled loops are also poorly
+  // vectorizable. Fall back to CBS for these cases.
+  //
+  // A barrier is treated as unconditional for this check when it
+  // postdominates the entry block, or the header of the loop containing
+  // it (loop backedges are treated as always-taken under OpenCL's
+  // all-or-none barrier rule). Any other barrier is considered
+  // conditional.
+  llvm::PostDominatorTree &PDT =
+      AM.getResult<llvm::PostDominatorTreeAnalysis>(K);
+  for (BasicBlock &BB : K) {
+    if (!Barrier::hasBarrier(&BB))
+      continue;
+
+    Loop *L = LI.getLoopFor(&BB);
+    BasicBlock *PostDomBlock =
+        L == nullptr ? &K.getEntryBlock() : L->getHeader();
+    if (PDT.dominates(&BB, PostDomBlock))
+      continue;
+
+    LLVM_DEBUG(dbgs() << "Conditional barrier not handled by WILoops; "
+                         "falling back to CBS:\n"
+                      << BB);
+    return false;
+  }
+
   return true;
 }
 
