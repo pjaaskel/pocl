@@ -55,7 +55,7 @@ set(PROGRAMS_TO_BUILD test_barrier_between_for_loops test_early_return
   test_workitem_func_outside_kernel test_program_scope_vars test_issue_1548
   test_issue_1525 test_issue_1608 test_issue_1826 test_builtin_regression
   test_mem_host_ptr_issue test_issue_1962 test_issue_2005
-  test_global_atomics test_large_stack_frame
+  test_issue_2113 test_global_atomics test_large_stack_frame
 )
 if(UNIX)
   list(APPEND PROGRAMS_TO_BUILD test_issue_2174)
@@ -122,6 +122,10 @@ add_test_pocl(NAME "regression/test_mem_host_ptr_issue"
 add_test_pocl(NAME "regression/test_issue_1962" COMMAND "test_issue_1962")
 
 add_test_pocl(NAME "regression/test_issue_2005" COMMAND "test_issue_2005")
+
+# Default (auto) handler must fall back to CBS; also verify CBS explicitly.
+add_test_pocl(NAME "regression/test_issue_2113" WORKITEM_HANDLER "loopvec;cbs;"
+  COMMAND "test_issue_2113")
 
 if(UNIX)
   add_test_pocl(NAME "regression/test_issue_2174" COMMAND "test_issue_2174")
