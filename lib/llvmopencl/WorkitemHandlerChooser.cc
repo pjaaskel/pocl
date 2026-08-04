@@ -89,11 +89,15 @@ WorkitemHandlerType ChooseWorkitemHandler(Function &F,
   }
 
   if (Result == WorkitemHandlerType::LOOPS &&
-      !WorkitemLoops::canHandleKernel(F, AM))
-    Result = WorkitemHandlerType::CBS;
-  else if (Result == WorkitemHandlerType::CBS &&
-           !SubCFGFormation::canHandleKernel(F, AM))
+      !WorkitemLoops::canHandleKernel(F, AM)) {
+    // Only switch to CBS when it can actually handle the kernel (needs
+    // barriers and at least one exit block). Otherwise keep LOOPS.
+    if (SubCFGFormation::canHandleKernel(F, AM))
+      Result = WorkitemHandlerType::CBS;
+  } else if (Result == WorkitemHandlerType::CBS &&
+             !SubCFGFormation::canHandleKernel(F, AM)) {
     Result = WorkitemHandlerType::LOOPS;
+  }
 
   return Result;
 }

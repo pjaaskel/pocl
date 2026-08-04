@@ -1383,6 +1383,39 @@ bool WorkitemLoops::canHandleKernel(llvm::Function &K,
     }
   }
 
+  // Unreachables and trivial infinite loops (e.g. while(1){}) confuse the
+  // loop-based WG methods: UnreachablesToReturns may delete abort paths, and
+  // LLVM can then mis-privatize values across barriers (see issue #2113 where
+  // get_local_id(0)%N was folded to 0 for every work-item). Prefer CBS when the
+  // kernel still has a normal exit so SubCFGFormation can handle it. Exit-less
+  // kernels (regression/infinite_loop) must stay on WIL — CBS cannot form
+  // sub-CFGs without an exit block (PR #2196).
+  //
+  // POCL_WILOOPS_DELETE_BLOCKS_WITH_UNREACHABLES restores the old WIL behavior
+  // of deleting unreachable blocks (also used by some FileCheck tests).
+  if (!pocl_get_bool_option("POCL_WILOOPS_DELETE_BLOCKS_WITH_UNREACHABLES",
+                            0)) {
+    bool HasExit = false;
+    bool HasProblematicCF = false;
+    for (BasicBlock &BB : K) {
+      Instruction *T = BB.getTerminator();
+      if (T->getNumSuccessors() == 0)
+        HasExit = true;
+      if (isa<UnreachableInst>(T))
+        HasProblematicCF = true;
+      // Trivial infinite loop: only successor is the block itself (while(1){} /
+      // for(;;);). Non-trivial wait loops that contain barriers still match
+      // this shape, but those kernels have no exit and stay on WIL above.
+      if (T->getNumSuccessors() == 1 && T->getSuccessor(0) == &BB)
+        HasProblematicCF = true;
+    }
+    if (HasProblematicCF && HasExit) {
+      LLVM_DEBUG(dbgs() << "Unreachable or trivial infinite loop with a "
+                           "kernel exit; falling back to CBS.\n");
+      return false;
+    }
+  }
+
   return true;
 }
 
