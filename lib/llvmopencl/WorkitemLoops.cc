@@ -135,6 +135,9 @@ private:
   void releaseParallelRegions();
   void shareReplicatedLocalMemAllocas(
       ParallelRegion &Region, llvm::ValueToValueMapTy &ReferenceMap);
+  /// True when \p Val is a pointer into work-group shared local memory
+  /// (local mem alloca call, or GEP/cast of an autolocal kernel argument).
+  bool isSharedLocalMemPointer(llvm::Value *Val);
 
   // Returns an instruction in the entry block which computes the
   // total size of work-items in the work-group. If it doesn't
@@ -474,6 +477,42 @@ void WorkitemLoopsImpl::shareReplicatedLocalMemAllocas(
       Replica->eraseFromParent();
     }
   }
+}
+
+bool WorkitemLoopsImpl::isSharedLocalMemPointer(llvm::Value *Val) {
+  // Strip GEPs and pointer casts to the base.
+  while (Val != nullptr) {
+    if (auto *GEP = dyn_cast<GetElementPtrInst>(Val)) {
+      Val = GEP->getPointerOperand();
+      continue;
+    }
+    if (auto *BC = dyn_cast<BitCastInst>(Val)) {
+      Val = BC->getOperand(0);
+      continue;
+    }
+    if (auto *ASC = dyn_cast<AddrSpaceCastInst>(Val)) {
+      Val = ASC->getOperand(0);
+      continue;
+    }
+    break;
+  }
+  if (Val == nullptr)
+    return false;
+
+  if (auto *CI = dyn_cast<CallInst>(Val)) {
+    Function *Callee = CI->getCalledFunction();
+    return Callee != nullptr &&
+           (Callee == LocalMemAllocaFuncDecl ||
+            Callee == WorkGroupAllocaFuncDecl);
+  }
+
+  // AutomaticLocals with autolocals_to_args turns __local arrays into kernel
+  // arguments marked as local AS in kernel_arg_addr_space metadata.
+  if (auto *Arg = dyn_cast<Argument>(Val)) {
+    if (Arg->getParent() != nullptr)
+      return isLocalMemFunctionArg(Arg->getParent(), Arg->getArgNo());
+  }
+  return false;
 }
 
 bool WorkitemLoopsImpl::processFunction(Function &F) {
@@ -1079,7 +1118,13 @@ void WorkitemLoopsImpl::addContextSaveRestore(llvm::Instruction *Def) {
     // we should disable rematerialization as it doesn't data flow
     // analyze the local_id_x access, which is set to 1 after the
     // peeled work-item.
-    if (PRegion != nullptr && RegionEntryCounts[PRegion->entryBB()] > 1)
+    //
+    // Exception: GEPs into shared local memory only depend on the local
+    // id loads (which are re-read at the remat site) and the uniform local
+    // buffer base. Rematerializing them is always safe and avoids context
+    // arrays of raw pointers into the WG-local buffer (pocl#849 / PR#2239).
+    if (PRegion != nullptr && RegionEntryCounts[PRegion->entryBB()] > 1 &&
+        !isSharedLocalMemPointer(Def))
       RematCandidate = false;
 
     if (StoreInst *ST = dyn_cast<StoreInst>(User)) {
@@ -1412,37 +1457,6 @@ bool WorkitemLoops::canHandleKernel(llvm::Function &K,
           dbgs() << "Multiple breaks inside a barrier loop, won't handle.\n");
       return false;
     }
-  }
-
-  // Do not handle kernels with conditional barriers via WILoops peeling.
-  // Peeling the first work-item to decide which barrier branch to take
-  // complicates parallel-region formation and has produced incorrect
-  // codegen (heap corruption / OOB local stores) for kernels that write
-  // to local memory both inside a conditional barrier region and again
-  // after it (see pocl/pocl#849). The peeled loops are also poorly
-  // vectorizable. Fall back to CBS for these cases.
-  //
-  // A barrier is treated as unconditional for this check when it
-  // postdominates the entry block, or the header of the loop containing
-  // it (loop backedges are treated as always-taken under OpenCL's
-  // all-or-none barrier rule). Any other barrier is considered
-  // conditional.
-  llvm::PostDominatorTree &PDT =
-      AM.getResult<llvm::PostDominatorTreeAnalysis>(K);
-  for (BasicBlock &BB : K) {
-    if (!Barrier::hasBarrier(&BB))
-      continue;
-
-    Loop *L = LI.getLoopFor(&BB);
-    BasicBlock *PostDomBlock =
-        L == nullptr ? &K.getEntryBlock() : L->getHeader();
-    if (PDT.dominates(&BB, PostDomBlock))
-      continue;
-
-    LLVM_DEBUG(dbgs() << "Conditional barrier not handled by WILoops; "
-                         "falling back to CBS:\n"
-                      << BB);
-    return false;
   }
 
   return true;

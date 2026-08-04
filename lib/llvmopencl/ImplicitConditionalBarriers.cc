@@ -155,6 +155,32 @@ ImplicitConditionalBarriers::run(llvm::Function &F,
     if (Barrier::hasOnlyBarrier(Pos) || !DT.dominates(Pos, BB))
       continue;
 
+    // Identify the split that makes the barrier conditional (Pred) and the
+    // join point before we mutate the CFG. Needed for the join-barrier fix
+    // below (pocl#849).
+    BasicBlock *Split = Pred;
+#if LLVM_MAJOR >= 23
+    auto *SplitBr = Split ? dyn_cast<CondBrInst>(Split->getTerminator())
+                         : nullptr;
+#else
+    BranchInst *SplitBr =
+        Split ? dyn_cast<BranchInst>(Split->getTerminator()) : nullptr;
+    if (SplitBr && !SplitBr->isConditional())
+      SplitBr = nullptr;
+#endif
+    BasicBlock *Join = nullptr;
+    if (SplitBr != nullptr) {
+      for (unsigned SI = 0; SI < SplitBr->getNumSuccessors(); ++SI) {
+        BasicBlock *Succ = SplitBr->getSuccessor(SI);
+        if (Succ == Pos)
+          continue;
+        if (PDT.dominates(Succ, BB)) {
+          Join = Succ;
+          break;
+        }
+      }
+    }
+
     // Let the source barrier's all-or-none execution guarantee apply to the
     // implicit barrier only when every path to the source crosses Pos.
 
@@ -180,6 +206,42 @@ ImplicitConditionalBarriers::run(llvm::Function &F,
                 << std::endl;
       Source->dump();
 #endif
+    }
+
+    // Insert a barrier before control from the conditional-barrier path
+    // rejoins the path that skipped the barrier. Without this, BarrierTail
+    // Replication pulls post-join code into the post-barrier region. WI-
+    // divergent branches there then become peel discriminators in
+    // WorkitemLoops, which incorrectly applies WI0's decision to all
+    // work-items (pocl#849 heap corruption / OOB stores).
+    if (Join != nullptr) {
+      SmallVector<BasicBlock *, 4> BarrierSidePreds;
+      for (BasicBlock *JoinPred : predecessors(Join)) {
+        if (JoinPred == Split)
+          continue; // the non-barrier side of the split
+        if (DT.dominates(Pos, JoinPred) || JoinPred == BB ||
+            DT.dominates(BB, JoinPred))
+          BarrierSidePreds.push_back(JoinPred);
+      }
+      if (!BarrierSidePreds.empty()) {
+        BasicBlock *JoinBarrier = BasicBlock::Create(
+            F.getContext(), Join->getName() + ".cond_bar_join", &F, Join);
+        Barrier::createAtStart(JoinBarrier);
+#if LLVM_MAJOR >= 23
+        UncondBrInst::Create(Join, JoinBarrier);
+#else
+        BranchInst::Create(Join, JoinBarrier);
+#endif
+        for (BasicBlock *JoinPred : BarrierSidePreds)
+          JoinPred->getTerminator()->replaceUsesOfWith(Join, JoinBarrier);
+
+        DT.recalculate(F);
+        PDT.recalculate(F);
+#ifdef DEBUG_COND_BARRIERS
+        std::cerr << "### added join barrier before " << Join->getName().str()
+                  << std::endl;
+#endif
+      }
     }
   }
 

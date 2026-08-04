@@ -2,8 +2,9 @@
 //
 // WorkitemLoops peeling of conditional barrier regions could miscompile
 // kernels that write to local memory both inside a conditional barrier
-// region and again after it, leading to heap corruption / invalid stores.
-// Auto/loopvec/loops should fall back to CBS for such kernels.
+// region and again after it, leading to heap corruption / invalid stores
+// when a WI-divergent branch after the barrier was used as a peel
+// discriminator (applying WI0's decision to all work-items).
 //
 // Copyright (c) 2026 PoCL developers
 //
